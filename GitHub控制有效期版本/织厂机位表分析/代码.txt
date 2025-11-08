@@ -1,0 +1,538 @@
+Sub ImportAndAnalyzeKnittingMachines()
+    ' ====== 过期检查 ======
+    Const EXPIRATION_DATE As Date = #3/20/2026#  ' 设置过期日期
+    If Date > EXPIRATION_DATE Then
+        MsgBox "This macro has expired. Please contact the developer for an updated version." & vbCrLf & _
+               "Contact: [Liu Yang]" & vbCrLf & _
+               "Email: [luckilyliuyang@163.com]" & vbCrLf & _
+               "Valid until: " & Format(EXPIRATION_DATE, "yyyy-mm-dd"), _
+               vbCritical, "Macro Expired"
+        Exit Sub
+    End If
+    Dim wbImport As Workbook
+    Dim wsB As Worksheet, wsC As Worksheet, wsD As Worksheet, wsE As Worksheet
+    Dim wsSingle As Worksheet, wsDouble As Worksheet, wsLog As Worksheet, wsFabric As Worksheet
+    Dim dictSingle As Object, dictDouble As Object ' {Type: Count}
+    Dim dictSingleOutOfService As Object, dictDoubleOutOfService As Object ' {Type: OutOfServiceCount}
+    Dim dictFabricCount As Object, dictFabricOutOfService As Object ' {FabricCode: Count/OutOfServiceCount}
+    Dim key As Variant
+    Dim rowSingle As Long, rowDouble As Long, logRow As Long, rowFabric As Long
+    Dim i As Long, groupCount As Long
+    Dim machineType As String, machineValue As String, fabricCode As String, thirdRowValue As String
+    Dim filePath As String
+    Dim wsVar As Variant
+    Dim rowRange As String, colRange As String
+    Dim outOfServiceCount As Long
+    Dim cellValue As Variant
+    
+    ' Initialize dictionaries
+    Set dictSingle = CreateObject("Scripting.Dictionary")
+    Set dictDouble = CreateObject("Scripting.Dictionary")
+    Set dictSingleOutOfService = CreateObject("Scripting.Dictionary")
+    Set dictDoubleOutOfService = CreateObject("Scripting.Dictionary")
+    Set dictFabricCount = CreateObject("Scripting.Dictionary")
+    Set dictFabricOutOfService = CreateObject("Scripting.Dictionary")
+    
+    ' Select target file
+    filePath = Application.GetOpenFilename("Excel Files (*.xlsx;*.xls),*.xlsx;*.xls", _
+                                          Title:="Select Excel File to Analyze")
+    If filePath = "False" Then Exit Sub
+    
+    ' Open workbook
+    Set wbImport = Workbooks.Open(filePath)
+    
+    ' Check required sheets
+    On Error Resume Next
+    Set wsB = wbImport.Sheets("B")
+    Set wsC = wbImport.Sheets("C")
+    Set wsD = wbImport.Sheets("D")
+    Set wsE = wbImport.Sheets("E")
+    On Error GoTo 0
+    
+    If wsB Is Nothing Or wsC Is Nothing Or wsD Is Nothing Or wsE Is Nothing Then
+        MsgBox "Missing required sheets (B, C, D, or E).", vbCritical
+        wbImport.Close SaveChanges:=False
+        Exit Sub
+    End If
+    
+    ' Create/reset sheets
+    On Error Resume Next
+    Application.DisplayAlerts = False
+    wbImport.Sheets("Single Knitting Machine").Delete
+    wbImport.Sheets("Double Knitting Machine").Delete
+    wbImport.Sheets("Extracted Types Log").Delete
+    wbImport.Sheets("Fabric Code").Delete
+    Application.DisplayAlerts = True
+    On Error GoTo 0
+    
+    ' Add result sheets
+    Set wsSingle = wbImport.Sheets.Add(After:=wbImport.Sheets(wbImport.Sheets.Count))
+    wsSingle.Name = "Single Knitting Machine"
+    Set wsDouble = wbImport.Sheets.Add(After:=wsSingle)
+    wsDouble.Name = "Double Knitting Machine"
+    Set wsLog = wbImport.Sheets.Add(After:=wsDouble)
+    wsLog.Name = "Extracted Types Log"
+    Set wsFabric = wbImport.Sheets.Add(After:=wsLog)
+    wsFabric.Name = "Fabric Code"
+    
+    ' Configure result sheets with formatting
+    ConfigureResultSheet wsSingle, "Single Knitting Machine"
+    ConfigureResultSheet wsDouble, "Double Knitting Machine"
+    ConfigureFabricSheet wsFabric
+    ConfigureLogSheet wsLog
+    
+    rowSingle = 2
+    rowDouble = 2
+    logRow = 2
+    rowFabric = 2
+    
+    ' Process each target sheet
+    For Each wsVar In Array(wsB, wsC, wsD, wsE)
+        Dim ws As Worksheet
+        Set ws = wsVar
+        
+        ' Process 4 groups in rows 3-18 (3-6, 7-10, 11-14, 15-18)
+        For groupCount = 1 To 4
+            Dim startRow3 As Long
+            startRow3 = 3 + (groupCount - 1) * 4
+            rowRange = startRow3 & "-" & (startRow3 + 3)
+            
+            ' Process A-J columns (5 groups)
+            For i = 1 To 5
+                Dim colStart As Long
+                colStart = (i - 1) * 2 + 1
+                colRange = Split(ws.Cells(1, colStart).Address, "$")(1) & "-" & _
+                           Split(ws.Cells(1, colStart + 1).Address, "$")(1)
+                
+                ProcessGroup ws, startRow3, colStart, rowRange, colRange, dictSingle, dictDouble, _
+                            dictSingleOutOfService, dictDoubleOutOfService, dictFabricCount, dictFabricOutOfService, _
+                            wsLog, logRow
+            Next i
+            
+            ' Process L-U columns (5 groups)
+            For i = 1 To 5
+                colStart = 12 + (i - 1) * 2
+                colRange = Split(ws.Cells(1, colStart).Address, "$")(1) & "-" & _
+                           Split(ws.Cells(1, colStart + 1).Address, "$")(1)
+                
+                ProcessGroup ws, startRow3, colStart, rowRange, colRange, dictSingle, dictDouble, _
+                            dictSingleOutOfService, dictDoubleOutOfService, dictFabricCount, dictFabricOutOfService, _
+                            wsLog, logRow
+            Next i
+        Next groupCount
+        
+        ' Process 3 groups in rows 20-31 (20-23, 24-27, 28-31)
+        For groupCount = 1 To 3
+            Dim startRow20 As Long
+            startRow20 = 20 + (groupCount - 1) * 4
+            rowRange = startRow20 & "-" & (startRow20 + 3)
+            
+            ' Process A-J columns (5 groups)
+            For i = 1 To 5
+                colStart = (i - 1) * 2 + 1
+                colRange = Split(ws.Cells(1, colStart).Address, "$")(1) & "-" & _
+                           Split(ws.Cells(1, colStart + 1).Address, "$")(1)
+                
+                ProcessGroup ws, startRow20, colStart, rowRange, colRange, dictSingle, dictDouble, _
+                            dictSingleOutOfService, dictDoubleOutOfService, dictFabricCount, dictFabricOutOfService, _
+                            wsLog, logRow
+            Next i
+            
+            ' Process L-U columns (5 groups)
+            For i = 1 To 5
+                colStart = 12 + (i - 1) * 2
+                colRange = Split(ws.Cells(1, colStart).Address, "$")(1) & "-" & _
+                           Split(ws.Cells(1, colStart + 1).Address, "$")(1)
+                
+                ProcessGroup ws, startRow20, colStart, rowRange, colRange, dictSingle, dictDouble, _
+                            dictSingleOutOfService, dictDoubleOutOfService, dictFabricCount, dictFabricOutOfService, _
+                            wsLog, logRow
+            Next i
+        Next groupCount
+    Next wsVar
+    
+    ' Write and format results with optimized sorting
+    WriteAndFormatResultsWithCustomSort wsSingle, dictSingle, dictSingleOutOfService, rowSingle, "Single"
+    WriteAndFormatResultsWithCustomSort wsDouble, dictDouble, dictDoubleOutOfService, rowDouble, "Double"
+    WriteFabricResults wsFabric, dictFabricCount, dictFabricOutOfService, rowFabric
+    
+    ' Auto-fit and format all sheets
+    FormatAllSheets wsSingle, wsDouble, wsLog, wsFabric
+    
+    ' 直接停留在Fabric Code表，不显示对话框
+    wsFabric.Activate
+End Sub
+
+' Process each group of cells
+Sub ProcessGroup(ws As Worksheet, startRow As Long, colStart As Long, rowRange As String, colRange As String, _
+                dictSingle As Object, dictDouble As Object, dictSingleOutOfService As Object, _
+                dictDoubleOutOfService As Object, dictFabricCount As Object, dictFabricOutOfService As Object, _
+                wsLog As Worksheet, ByRef logRow As Long)
+    
+    Dim machineType As String, machineValue As String, fabricCode As String, thirdRowValue As String
+    Dim outOfServiceCount As Long, cellValue As Variant
+    
+    ' Get fabric code (first row of the group, take first 8 characters)
+    fabricCode = Left(ws.Cells(startRow, colStart).Value, 8)
+    
+    ' Get values (2nd value = startRow +1; 3rd value = startRow +2; 4th value = startRow +3)
+    machineType = ws.Cells(startRow, colStart).Offset(1, 0).Value
+    cellValue = ws.Cells(startRow, colStart).Offset(2, 0).Value
+    thirdRowValue = CStr(cellValue)
+    machineValue = ws.Cells(startRow, colStart).Offset(3, 0).Value
+    
+    ' Check if out of service (3rd row not empty)
+    outOfServiceCount = 0
+    If Not IsEmpty(cellValue) Then
+        If Len(Trim(thirdRowValue)) > 0 Then
+            outOfServiceCount = 1
+        End If
+    End If
+    
+    ' Process Single category
+    If machineType = "H120" Or machineType = "H90" Or machineType = "Z122" Then
+        UpdateDictionary dictSingle, dictSingleOutOfService, machineValue, outOfServiceCount
+        UpdateDictionary dictFabricCount, dictFabricOutOfService, fabricCode, outOfServiceCount
+        WriteLogEntry wsLog, logRow, ws.Name, rowRange, colRange, machineValue, "Single", fabricCode, thirdRowValue, outOfServiceCount
+        
+    ' Process Double category
+    ElseIf machineType = "B72" Or machineType = "M72" Or machineType = "M96" Or machineType = "M76" Then
+        UpdateDictionary dictDouble, dictDoubleOutOfService, machineValue, outOfServiceCount
+        UpdateDictionary dictFabricCount, dictFabricOutOfService, fabricCode, outOfServiceCount
+        WriteLogEntry wsLog, logRow, ws.Name, rowRange, colRange, machineValue, "Double", fabricCode, thirdRowValue, outOfServiceCount
+    End If
+End Sub
+
+' Update dictionary values
+Sub UpdateDictionary(dictCount As Object, dictOutOfService As Object, key As String, outOfServiceCount As Long)
+    If dictCount.Exists(key) Then
+        dictCount(key) = dictCount(key) + 1
+        dictOutOfService(key) = dictOutOfService(key) + outOfServiceCount
+    Else
+        dictCount.Add key, 1
+        dictOutOfService.Add key, outOfServiceCount
+    End If
+End Sub
+
+' Write log entry
+Sub WriteLogEntry(wsLog As Worksheet, ByRef logRow As Long, sheetName As String, rowRange As String, _
+                colRange As String, typeValue As String, category As String, fabricCode As String, _
+                thirdRowValue As String, outOfServiceCount As Long)
+    
+    wsLog.Cells(logRow, 1).Value = sheetName
+    wsLog.Cells(logRow, 2).Value = "Rows " & rowRange & ", Columns " & colRange
+    wsLog.Cells(logRow, 3).Value = typeValue
+    wsLog.Cells(logRow, 4).Value = category
+    wsLog.Cells(logRow, 5).Value = fabricCode
+    wsLog.Cells(logRow, 6).Value = thirdRowValue
+    wsLog.Cells(logRow, 7).Value = IIf(outOfServiceCount = 1, "Yes", "No")
+    logRow = logRow + 1
+End Sub
+
+' Configure Single/Double result sheet
+Sub ConfigureResultSheet(ws As Worksheet, sheetName As String)
+    With ws
+        .Range("A1").Value = "Type"
+        .Range("B1").Value = "Single/Double"
+        .Range("C1").Value = "Number of machines"
+        .Range("D1").Value = "Out of service"
+        .Range("E1").Value = "Operational machines"
+        
+        ' Format headers
+        With .Range("A1:E1")
+            .Font.Bold = True
+            .Font.Color = RGB(255, 255, 255)
+            .Interior.Color = RGB(31, 78, 121)
+            .HorizontalAlignment = xlCenter
+        End With
+        
+        .Columns("C:E").NumberFormat = "0"
+        .Columns("A:E").ColumnWidth = 18
+    End With
+End Sub
+
+' Configure Fabric Code sheet
+Sub ConfigureFabricSheet(ws As Worksheet)
+    With ws
+        .Range("A1").Value = "Fabric Code"
+        .Range("B1").Value = "Number of machines"
+        .Range("C1").Value = "Out of service"
+        .Range("D1").Value = "Operational machines"
+        
+        ' Format headers
+        With .Range("A1:D1")
+            .Font.Bold = True
+            .Font.Color = RGB(255, 255, 255)
+            .Interior.Color = RGB(0, 102, 102)
+            .HorizontalAlignment = xlCenter
+        End With
+        
+        .Columns("B:D").NumberFormat = "0"
+        .Columns("A:D").ColumnWidth = 20
+    End With
+End Sub
+
+' Configure Log sheet
+Sub ConfigureLogSheet(ws As Worksheet)
+    With ws
+        .Range("A1").Value = "Source Sheet"
+        .Range("B1").Value = "Group Location"
+        .Range("C1").Value = "Type Value"
+        .Range("D1").Value = "Category"
+        .Range("E1").Value = "Fabric Code"
+        .Range("F1").Value = "Third Row Value"
+        .Range("G1").Value = "Out of Service"
+        
+        ' Format headers
+        With .Range("A1:G1")
+            .Font.Bold = True
+            .Font.Color = RGB(255, 255, 255)
+            .Interior.Color = RGB(128, 0, 128)
+            .HorizontalAlignment = xlCenter
+        End With
+        
+        .Columns("A:G").ColumnWidth = 15
+    End With
+End Sub
+
+' Write and format Single/Double results with custom sorting - 修正版本
+Sub WriteAndFormatResultsWithCustomSort(ws As Worksheet, dictCount As Object, dictOutOfService As Object, ByRef rowNum As Long, category As String)
+    Dim key As Variant
+    Dim totalMachines As Long, totalOutOfService As Long
+    Dim lastDataRow As Long
+    Dim sortHelper As Object
+    Dim sortedKeys() As Variant
+    Dim i As Long, j As Long
+    
+    ' Create dictionary for sorting
+    Set sortHelper = CreateObject("Scripting.Dictionary")
+    
+    totalMachines = 0
+    totalOutOfService = 0
+    lastDataRow = rowNum ' Record starting row
+    
+    ' First, collect all data and create sort keys
+    For Each key In dictCount
+        Dim sortKey As String
+        ' Extract positions 3-5 for sorting
+        If Len(key) >= 5 Then
+            sortKey = Mid(key, 3, 3) ' Positions 3-5
+        ElseIf Len(key) >= 3 Then
+            sortKey = Mid(key, 3, Len(key) - 2) ' Whatever is available from position 3
+        Else
+            sortKey = key ' Fallback to full value
+        End If
+        
+        ' Pad with zeros to ensure proper numeric sorting
+        sortKey = Format(sortKey, "000")
+        
+        ' Store in dictionary with original key and count data
+        sortHelper(sortKey & "|" & key) = Array(key, dictCount(key), dictOutOfService(key))
+    Next key
+    
+    ' Get sorted keys
+    sortedKeys = sortHelper.Keys
+    Call QuickSort(sortedKeys, 0, UBound(sortedKeys))
+    
+    ' Write sorted data to worksheet
+    For i = 0 To UBound(sortedKeys)
+        Dim data As Variant
+        data = sortHelper(sortedKeys(i))
+        
+        ws.Cells(rowNum, 1).Value = data(0) ' Original key
+        ws.Cells(rowNum, 2).Value = category
+        ws.Cells(rowNum, 3).Value = data(1) ' Count
+        ws.Cells(rowNum, 4).Value = data(2) ' Out of service
+        ws.Cells(rowNum, 5).Value = data(1) - data(2) ' Operational machines
+        
+        ' Conditional formatting for out of service
+        If data(2) > 0 Then
+            ws.Cells(rowNum, 4).Interior.Color = RGB(255, 199, 206) ' Light red for out of service
+        End If
+        
+        ' Highlight operational machines
+        If (data(1) - data(2)) > 0 Then
+            ws.Cells(rowNum, 5).Interior.Color = RGB(198, 239, 206) ' Light green for operational
+        End If
+        
+        totalMachines = totalMachines + data(1)
+        totalOutOfService = totalOutOfService + data(2)
+        rowNum = rowNum + 1
+    Next i
+    
+    ' Add totals row
+    If rowNum > lastDataRow Then
+        ws.Cells(rowNum, 1).Value = "TOTAL"
+        ws.Cells(rowNum, 2).Value = category
+        ws.Cells(rowNum, 3).Value = totalMachines
+        ws.Cells(rowNum, 4).Value = totalOutOfService
+        ws.Cells(rowNum, 5).Value = totalMachines - totalOutOfService
+        
+        ' Format totals row
+        With ws.Range("A" & rowNum & ":E" & rowNum)
+            .Font.Bold = True
+            .Interior.Color = RGB(216, 216, 216)
+            .Font.Color = RGB(0, 0, 0)
+        End With
+        rowNum = rowNum + 1
+    End If
+    
+    ' Apply table formatting
+    If rowNum > 2 Then
+        ApplyTableFormatting ws, rowNum - 1
+    End If
+    
+    ' Clean up
+    Set sortHelper = Nothing
+End Sub
+
+' QuickSort algorithm for sorting keys
+Sub QuickSort(arr As Variant, first As Long, last As Long)
+    Dim pivot As String
+    Dim i As Long, j As Long
+    Dim temp As Variant
+    
+    If first < last Then
+        pivot = arr((first + last) \ 2)
+        i = first
+        j = last
+        
+        Do
+            Do While arr(i) < pivot
+                i = i + 1
+            Loop
+            
+            Do While arr(j) > pivot
+                j = j - 1
+            Loop
+            
+            If i <= j Then
+                temp = arr(i)
+                arr(i) = arr(j)
+                arr(j) = temp
+                i = i + 1
+                j = j - 1
+            End If
+        Loop While i <= j
+        
+        If first < j Then QuickSort arr, first, j
+        If i < last Then QuickSort arr, i, last
+    End If
+End Sub
+
+' Write and format Fabric results
+Sub WriteFabricResults(ws As Worksheet, dictCount As Object, dictOutOfService As Object, ByRef rowNum As Long)
+    Dim key As Variant
+    Dim totalMachines As Long, totalOutOfService As Long
+    Dim startRow As Long
+    
+    totalMachines = 0
+    totalOutOfService = 0
+    startRow = rowNum ' Record starting row
+    
+    ' Write all data rows first
+    For Each key In dictCount
+        ws.Cells(rowNum, 1).Value = key
+        ws.Cells(rowNum, 2).Value = dictCount(key)
+        ws.Cells(rowNum, 3).Value = dictOutOfService(key)
+        ws.Cells(rowNum, 4).Value = dictCount(key) - dictOutOfService(key) ' Operational machines
+        
+        ' Conditional formatting
+        If dictOutOfService(key) > 0 Then
+            ws.Cells(rowNum, 3).Interior.Color = RGB(255, 199, 206)
+        End If
+        
+        If (dictCount(key) - dictOutOfService(key)) > 0 Then
+            ws.Cells(rowNum, 4).Interior.Color = RGB(198, 239, 206)
+        End If
+        
+        totalMachines = totalMachines + dictCount(key)
+        totalOutOfService = totalOutOfService + dictOutOfService(key)
+        rowNum = rowNum + 1
+    Next key
+    
+    ' Sort data first, then add TOTAL row
+    If rowNum > startRow Then
+        ' Sort data first
+        With ws.Sort
+            .SortFields.Clear
+            .SortFields.Add key:=ws.Range("A" & startRow & ":A" & rowNum - 1), SortOn:=xlSortOnValues, Order:=xlAscending
+            .SetRange ws.Range("A" & startRow - 1 & ":D" & rowNum - 1) ' Include header
+            .Header = xlYes
+            .Apply
+        End With
+    End If
+    
+    ' Add TOTAL row after all data is written and sorted
+    If rowNum > 2 Then
+        ws.Cells(rowNum, 1).Value = "TOTAL"
+        ws.Cells(rowNum, 2).Value = totalMachines
+        ws.Cells(rowNum, 3).Value = totalOutOfService
+        ws.Cells(rowNum, 4).Value = totalMachines - totalOutOfService
+        
+        ' Format totals row
+        With ws.Range("A" & rowNum & ":D" & rowNum)
+            .Font.Bold = True
+            .Interior.Color = RGB(216, 216, 216)
+            .Font.Color = RGB(0, 0, 0)
+        End With
+        rowNum = rowNum + 1
+    End If
+    
+    ' Apply table formatting
+    If rowNum > 2 Then
+        ApplyTableFormatting ws, rowNum - 1
+    End If
+End Sub
+
+' Apply table formatting
+Sub ApplyTableFormatting(ws As Worksheet, lastRow As Long)
+    Dim lastCol As Long
+    lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
+    
+    With ws.Range("A1", ws.Cells(lastRow, lastCol))
+        ' Add borders
+        .Borders.LineStyle = xlContinuous
+        .Borders.Weight = xlThin
+        
+        ' Alternate row coloring (skip headers and totals)
+        Dim i As Long
+        For i = 2 To lastRow - 1 Step 2 ' Start from row 2, end at second last row (exclude totals)
+            If UCase(ws.Cells(i, 1).Value) <> "TOTAL" Then ' Ensure not TOTAL row
+                ws.Range(ws.Cells(i, 1), ws.Cells(i, lastCol)).Interior.Color = RGB(248, 248, 248)
+            End If
+        Next i
+    End With
+    
+    ' Auto-fit columns
+    ws.Columns.AutoFit
+End Sub
+
+' Format all sheets
+Sub FormatAllSheets(wsSingle As Worksheet, wsDouble As Worksheet, wsLog As Worksheet, wsFabric As Worksheet)
+    ' Freeze panes for easy navigation
+    wsSingle.Activate
+    wsSingle.Range("A2").Select
+    ActiveWindow.FreezePanes = True
+    
+    wsDouble.Activate
+    wsDouble.Range("A2").Select
+    ActiveWindow.FreezePanes = True
+    
+    wsFabric.Activate
+    wsFabric.Range("A2").Select
+    ActiveWindow.FreezePanes = True
+    
+    wsLog.Activate
+    wsLog.Range("A2").Select
+    ActiveWindow.FreezePanes = True
+    
+    ' Set tab colors
+    wsSingle.Tab.Color = RGB(91, 155, 213)    ' Blue
+    wsDouble.Tab.Color = RGB(237, 125, 49)   ' Orange
+    wsFabric.Tab.Color = RGB(112, 173, 71)  ' Green
+    wsLog.Tab.Color = RGB(255, 192, 0)      ' Yellow
+End Sub
+
+
+
