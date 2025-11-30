@@ -1,0 +1,55 @@
+一，放最前面 
+   ' 先执行有效期验证
+    ' Execute expiration validation first
+    If Not CheckExpiration() Then
+    Exit Sub ' Exit if expired
+    End If
+二，放最后面
+
+' Expiration check function
+Function CheckExpiration() As Boolean
+    Dim filePath As String
+    Dim fileContent As String
+    Dim expireDate As Date
+    Dim today As Date
+    Dim fileNumber As Integer
+    
+    ' Company intranet server file path
+    filePath = "\\172.16.232.67\sap\CPO\expire.txt"
+    
+    ' Read file content
+    On Error Resume Next
+    fileNumber = FreeFile()
+    Open filePath For Input As fileNumber
+    If Err.Number <> 0 Then
+        MsgBox "Unable to access expiration file. Please check network connection or contact administrator.", vbCritical
+        CheckExpiration = False
+        Exit Function
+    End If
+    
+    ' Read file content
+    Line Input #fileNumber, fileContent
+    Close fileNumber
+    On Error GoTo 0
+    
+    ' Parse expiration date (handle line breaks and spaces)
+    On Error Resume Next
+    expireDate = DateValue(Trim(Replace(fileContent, vbLf, "")))
+    On Error GoTo 0
+    
+    ' Check if date format is correct
+    If expireDate = 0 Then
+        MsgBox "Invalid expiration date format. Please contact administrator.", vbCritical
+        CheckExpiration = False
+        Exit Function
+    End If
+    
+    ' Verify if expired
+    today = Date
+    If today > expireDate Then
+        MsgBox "Version has expired. Please contact author: Liu Yang Email: luckilyliuyang@163.com", vbCritical
+        CheckExpiration = False
+    Else
+        CheckExpiration = True
+    End If
+End Function
