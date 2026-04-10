@@ -1,0 +1,1 @@
+=IF(ISNA(VLOOKUP("*"&B4&"*",Sheet1!$A$1:$F$93,5,FALSE)),"",IF(VLOOKUP("*"&B4&"*",Sheet1!$A$1:$F$93,5,FALSE)="",MID(VLOOKUP("*"&B4&"*",Sheet1!$A$1:$F$93,4,FALSE),5,8)&VLOOKUP("*"&B4&"*",Sheet1!$A$1:$F$93,6,FALSE),VLOOKUP("*"&B4&"*",Sheet1!$A$1:$F$93,5,FALSE)&VLOOKUP("*"&B4&"*",Sheet1!$A$1:$F$93,6,FALSE)))
