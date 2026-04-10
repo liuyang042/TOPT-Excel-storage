@@ -1,0 +1,99 @@
+Sub ClearWorksheetData()
+    On Error GoTo ErrorHandler
+    
+    ' 禁用所有可能影响性能的功能
+    With Application
+        .ScreenUpdating = False
+        .Calculation = xlCalculationManual
+        .EnableEvents = False
+        .DisplayAlerts = False
+    End With
+    
+    ' 清除各工作表数据（增加取消筛选功能）
+    ClearRangeThisWorkbook "WIP", "A2:AG2"
+    ClearRangeThisWorkbook "Stock", "A2:R2"
+    ClearRangeThisWorkbook "Stock+WIP", "B3:G3"
+    ClearRangeThisWorkbook "Undelivered QTY", "B2:S2"
+    ClearRangeThisWorkbook "E-mail", "A3:V3"
+    
+CleanExit:
+    ' 恢复所有设置
+    With Application
+        .ScreenUpdating = True
+        .Calculation = xlCalculationAutomatic
+        .EnableEvents = True
+        .DisplayAlerts = True
+    End With
+    Exit Sub
+    
+ErrorHandler:
+    MsgBox "An error occurred during execution:" & Err.Description, vbExclamation
+    Resume CleanExit
+End Sub
+
+Sub ClearRangeThisWorkbook(sheetName As String, startRange As String)
+    Dim ws As Worksheet
+    Dim rngStart As Range
+    Dim lastRow As Long
+    Dim endCol As Long
+    Dim clearRange As Range
+    Dim fullDataRange As Range
+    Dim lastCell As Range
+    
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets(sheetName)
+    If ws Is Nothing Then Exit Sub
+    On Error GoTo 0
+    
+    ' 取消工作表的筛选状态
+    If ws.FilterMode Then
+        ws.ShowAllData
+    End If
+    
+    Set rngStart = ws.Range(startRange)
+    
+    ' 计算整个目标区域内的最后一行
+    With ws
+        endCol = rngStart.Column + rngStart.Columns.Count - 1
+        Set fullDataRange = .Range(rngStart, .Cells(.Rows.Count, endCol))
+        
+        ' 查找最后一个有数据的单元格
+        Set lastCell = fullDataRange.Find(What:="*", _
+                                         After:=fullDataRange.Cells(1), _
+                                         LookIn:=xlValues, _
+                                         LookAt:=xlPart, _
+                                         SearchOrder:=xlByRows, _
+                                         SearchDirection:=xlPrevious, _
+                                         MatchCase:=False)
+        
+        ' 检查是否找到数据
+        If lastCell Is Nothing Then
+            ' 没有数据，检查起始行是否需要清除
+            If WorksheetFunction.CountA(rngStart.EntireRow.Resize(1, rngStart.Columns.Count)) > 0 Then
+                ' 起始行有数据，清除起始行
+                rngStart.EntireRow.Resize(1, rngStart.Columns.Count).ClearContents
+                Debug.Print "Cleared starting range " & rngStart.Address & " on " & sheetName
+            End If
+            Exit Sub
+        Else
+            lastRow = lastCell.Row
+        End If
+    End With
+    
+    ' 检查是否需要清除数据 - 修改判断条件为 >=
+    If lastRow >= rngStart.Row Then
+        ' 如果最后一行等于起始行，检查起始行是否真的需要清除
+        If lastRow = rngStart.Row Then
+            ' 检查起始行范围内是否有数据
+            If WorksheetFunction.CountA(rngStart) > 0 Then
+                rngStart.ClearContents
+                Debug.Print "Cleared starting range " & rngStart.Address & " on " & sheetName
+            End If
+        Else
+            ' 多行数据的情况
+            Set clearRange = ws.Range(rngStart.Cells(1, 1), ws.Cells(lastRow, endCol))
+            clearRange.ClearContents
+            Debug.Print "Cleared " & clearRange.Address & " on " & sheetName
+        End If
+    End If
+End Sub
