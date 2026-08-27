@@ -1,0 +1,64 @@
+Sub ClearWorksheetData()
+    On Error GoTo ErrorHandler
+    
+    ' 禁用所有可能影响性能的功能
+    With Application
+        .ScreenUpdating = False
+        .Calculation = xlCalculationManual
+        .EnableEvents = False
+        .DisplayAlerts = False
+    End With
+    
+    ' 清除各工作表数据（增加取消筛选功能）
+    ClearRangeThisWorkbook "WIP", "A2:AG"
+    ClearRangeThisWorkbook "Stock", "A2:R"
+    ClearSingleRow "Stock+WIP", "B3:H3"  ' 单独安全清除单行，不碰A3
+    
+CleanExit:
+    ' 恢复所有设置
+    With Application
+        .ScreenUpdating = True
+        .Calculation = xlCalculationAutomatic
+        .EnableEvents = True
+        .DisplayAlerts = True
+    End With
+    Exit Sub
+    
+ErrorHandler:
+    MsgBox "An error occurred during execution: " & Err.Description, vbExclamation
+    Resume CleanExit
+End Sub
+
+' 专门清除：从第X行一直往下清到最后一行（适合 WIP / Stock）
+Sub ClearRangeThisWorkbook(sheetName As String, colRange As String)
+    Dim ws As Worksheet
+    Dim lastRow As Long
+    
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets(sheetName)
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Sub
+    
+    ' 取消筛选
+    If ws.FilterMode Then ws.ShowAllData
+    
+    ' 获取最后一行
+    lastRow = ws.UsedRange.Rows(ws.UsedRange.Rows.Count).Row
+    If lastRow < 2 Then lastRow = 2
+    
+    ' 清除数据
+    ws.Range(colRange & lastRow).ClearContents
+End Sub
+
+' 专门清除：单行固定区域（适合 Stock+WIP!B3:H3，绝对安全）
+Sub ClearSingleRow(sheetName As String, targetRange As String)
+    Dim ws As Worksheet
+    
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets(sheetName)
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Sub
+    
+    ' 只清除指定单元格，绝不碰其他区域
+    ws.Range(targetRange).ClearContents
+End Sub
