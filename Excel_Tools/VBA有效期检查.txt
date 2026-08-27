@@ -1,0 +1,116 @@
+宏过期验证全套方案文档
+一、远程文件链接地址（留意ExcelLicense更换仓库名称）
+Gitee 链接：
+https://raw.giteeusercontent.com/liuyang042/ExcelLicense/raw/main/expire.txt
+
+Github 链接：
+https://raw.githubusercontent.com/liuyang042/ExcelLicense/refs/heads/main/expire.txt
+
+二、Github 同步至 Gitee 私人令牌
+
+a657f798c376a4484be2626c3c390b42
+
+
+三、宏过期检查写法说明
+ 场景一：程序执行前检查（宏入口处）
+
+Sub MyProtectedMacro()
+'**********************************************************************************************************************************************
+    If Not CheckExpiration() Then Exit Sub
+'**********************************************************************************************************************************************
+    ' 此处放置你需要保护的业务代码
+End Sub
+
+场景二：点击工作表时检查（工作表事件）
+使用说明：代码放置在对应工作表模块中（例：Sheet1）
+'**********************************************************************************************************************************************
+' =============================================
+' Worksheet Activate Event with Protection
+' Place this in the DATA sheet module
+' =============================================
+Private Sub Worksheet_Activate()
+    ' 优先执行有效期验证
+    If Not CheckExpiration() Then
+        ' 已过期则禁止当前工作表操作并跳转首页
+        Application.EnableEvents = False
+        If ThisWorkbook.Sheets.Count > 1 Then
+            ThisWorkbook.Sheets(1).Activate
+        End If
+        Application.EnableEvents = True
+        Exit Sub
+    End If
+    
+    ' 授权有效，正常执行表格操作
+    Range("A2").Select
+End Sub
+'**********************************************************************************************************************************************
+场景三：打开工作簿时检查（工作簿事件）
+使用说明：代码放置在 ThisWorkbook 模块中
+> 原理：打开文件自动触发验证，过期直接关闭文件，限制使用
+```vba
+'**********************************************************************************************************************************************
+Private Sub Workbook_Open()
+    ' 打开工作簿时进行有效期检查
+    If Not CheckExpiration() Then
+        ' 过期提示后立即关闭工作簿，不保存变更
+        ThisWorkbook.Close SaveChanges:=False
+    End If
+End Sub
+'**********************************************************************************************************************************************
+四、核心公共函数：联网有效期校验
+
+Public Function CheckExpiration() As Boolean
+    Dim githubLink As String
+    Dim http As Object
+    Dim expireDate As Date
+    Dim today As Date
+    Dim httpStatus As Long                    ' 用来存放网络请求状态码
+
+    ' 远程过期日期文件地址
+    githubLink = "https://raw.giteeusercontent.com/liuyang042/Xlsm_ALL/raw/main/Kiniting_Status_Analysis.txt"
+
+    ' 创建网络请求组件
+    On Error Resume Next
+    Set http = CreateObject("WinHttp.WinHttpRequest.5.1")
+    On Error GoTo 0
+    If http Is Nothing Then
+        MsgBox "Unable to create network component. Please contact author: Liu Yang Email: luckilyliuyang@163.com", vbCritical
+        CheckExpiration = False
+        Exit Function
+    End If
+
+    ' 网络请求超时与异常捕获
+    On Error Resume Next
+    http.SetTimeouts 15000, 15000, 15000, 15000
+    http.Open "GET", githubLink, False
+    http.Send
+    httpStatus = http.Status
+    On Error GoTo 0
+
+    ' 网络请求失败判断
+    If httpStatus <> 200 Then
+        MsgBox "Failed to verify version. Please contact author: Liu Yang Email: luckilyliuyang@163.com", vbCritical
+        CheckExpiration = False
+        Exit Function
+    End If
+
+    ' 日期格式转换校验
+    On Error Resume Next
+    expireDate = DateValue(Trim$(http.ResponseText))
+    On Error GoTo 0
+
+    If expireDate = 0 Then
+        MsgBox "Invalid expiration date format. Please contact author.", vbCritical
+        CheckExpiration = False
+        Exit Function
+    End If
+
+    ' 日期对比，判断是否过期
+    today = Date
+    If today > expireDate Then
+        MsgBox "Version expired. Please contact author: Liu Yang Email: luckilyliuyang@163.com", vbCritical
+        CheckExpiration = False
+    Else
+        CheckExpiration = True
+    End If
+End Function
